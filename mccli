@@ -1,0 +1,518 @@
+#!/usr/bin/env python3
+'''Tool to nicely display CDMI status'''
+# pylint # {{{
+# pylint: disable=bad-continuation, invalid-name, superfluous-parens
+# pylint: disable=bad-whitespace
+# pylint: disable=redefined-outer-name, old-style-class
+# pylint: disable=no-member, too-many-instance-attributes
+# }}}
+
+import json
+import argparse
+import errno
+import re
+from sys import stdout
+from os import makedirs
+from os.path import basename
+import copy
+import requests
+
+# Defaults:
+OIDC_TOKEN=""
+CDMI_USER="restadmin"
+CDMI_PASS="d38c4d243e3e80cec708"
+CDMI_USER_L="xxxx"
+CDMI_PASS_L="xxxx"
+HPSS_USER="restadmin"
+HPSS_PASS="1b3cc94ea657b7976a5f"
+
+class Cdmi_Object_Class:# {{{
+	'''Capture the CDMI metadata of an Object'''# {{{
+# path	/cdmi_capabilities/dataobject/DiskAndTape
+	required_capabilities = [
+		"capabilitiesURI",
+		"completionStatus",
+		"domainURI",
+		"objectID",
+		"objectName",
+		"objectType",
+		"parentID",
+		"parentURI",
+		"metadata"]
+	optional_capabilities_object = ['mimetype']
+	optional_capabilities_container = [
+		   "childrenrange",
+		   "children",
+		   "exports"]
+	hidden_capabilities = [
+			"objectID",
+			"objectName",
+			"parentID",
+			"parentURI",
+			"domainURI"]
+	interesting_metadata_fields = [
+			"cdmi_capabilities_target",
+			"cdmi_recommended_polling_interval"]
+	type = 'undefined'
+# }}}
+	def __init__(self, url):# {{{
+		'''constructor'''
+		jsonData = cached_request_json (url, cdmi_auth)
+		# self.path = jsonData['parentURI'] + '/' + jsonData['objectName']
+		self.url_basename = get_url_base(url)
+		self.path = '/'.join((jsonData['parentURI'] , jsonData['objectName']))\
+				.replace('//', '/')\
+				.replace('//', '/')
+		self.url  = self.url_basename + self.path
+		self.raw_json = jsonData
+		self.my_capabilities=[]
+		for key in self.required_capabilities:
+			setattr(self, key, jsonData[key])
+			self.my_capabilities.append(key)
+		for key in self.optional_capabilities_object:
+			try:
+				setattr(self, key, jsonData[key])
+				self.my_capabilities.append(key)
+				self.type = 'dataobject'
+			except KeyError:
+				pass
+		for key in self.optional_capabilities_container:
+			try:
+				setattr(self, key, jsonData[key])
+				self.my_capabilities.append(key)
+				self.type = 'container'
+			except KeyError:
+				pass
+		# if args.raw:
+			# print ("\n-----------------------------------------")
+			# print (json.dumps(self.raw_json, sort_keys=True, indent=4, separators=(',', ': ')))
+			# print ("-----------------------------------------\n")
+
+		# print(json.dumps(jsonData, sort_keys=True, indent=4, separators=(',', ': ')))
+# }}}
+	def get_cdmi_object_type(self):# {{{
+		'''return cdmi_object_type'''
+		return self.type
+# }}}
+	def get_cdmi_capability_classname(self):# {{{
+		''' return capability class name '''
+		return basename(self.capabilitiesURI)
+# }}}
+	def get_cdmi_capability_class(self):# {{{
+		''' return capability class'''
+		cap_url = self.get_current_capability_url()
+		cap_cls = Cdmi_Capability_Class(cap_url)
+		return cap_cls
+# }}}
+	def get_current_capability_url(self):# {{{
+		''' return url to the capability class definition of this cdmi object'''
+		url = "/".join((self.url_basename,self.capabilitiesURI))
+		return (url)
+# }}}
+	def get_transition_status(self): #{{{
+		''' return if the object is in transition. empty if not, a dict of
+				(cdmi_capabilities_target, cdmi_recommended_polling_interval) if in transition
+		'''
+		retval = {}
+		try:
+			retval = {'cdmi_capabilities_target': self.metadata['cdmi_capabilities_target'], \
+				'cdmi_recommended_polling_interval': self.metadata['cdmi_recommended_polling_interval']}
+		except KeyError:
+			pass
+		return retval
+# }}}
+	def display_full(self):# {{{
+		'''nice rendering of self'''
+		print("%s" % (self.url))
+		# print("					   objectName : %s" % self.objectName )
+		for cap in self.my_capabilities:
+			if isinstance(getattr(self, cap), dict):
+				print ("%30s : " % cap)
+				tmp = json.dumps(getattr(self, cap),
+					sort_keys=True, indent=4, separators=(',', ': '))\
+							.replace("{","")\
+							.replace("\n","                               ",1)\
+							.replace("}\n","")\
+							.replace("}","")
+				tmp = re.sub("\n", "\n                               ", tmp)
+				print (tmp)
+			elif isinstance(getattr(self, cap), list):
+				print ("%30s : " % cap)
+				for i in getattr(self, cap):
+					print("                                    %s" % i)
+			else:
+				print ("%30s :	  %s" % (cap, getattr(self, cap)))
+		# print(json.dumps(self.raw_json['metadata'], sort_keys=True, indent=4, separators=(',', ': ')))
+		print ('')
+# }}}
+	def display(self):# {{{
+		'''nice rendering of self'''
+		print("%s" % (self.url))
+		# print ("	                          Type :	  %s" % self.type)
+		for cap in (self.my_capabilities):
+			if cap not in self.hidden_capabilities:
+				# print ("cap: {}".format(cap))
+				if cap == 'metadata':
+					# tmp_raw = copy.deepcopy(self.raw_json['metadata'])
+					# del(tmp_raw['metadata'])
+					tmp_raw={}
+					for field in self.interesting_metadata_fields:
+						try:
+							tmp_raw[field]=self.raw_json['metadata'][field]
+						except KeyError:
+							pass
+					if tmp_raw != {}:
+						tmp = json.dumps(tmp_raw, cap, sort_keys=True, indent=4, separators=(',', ': '))\
+									.replace("{","")\
+									.replace("\n","    ",1)\
+									.replace("}\n","")\
+									.replace("}","")
+						tmp = re.sub("\n", "\n                                     ", tmp)
+						stdout.write (" Object is in transition. Status:")
+						print (tmp)
+
+				elif isinstance(getattr(self, cap), dict):
+					print ("%30s : " % cap)
+					tmp = json.dumps(getattr(self, cap),
+						sort_keys=True, indent=4, separators=(',', ': '))\
+								.replace("{","")\
+								.replace("\n","                               ",1)\
+								.replace("}\n","")\
+								.replace("}","")
+					tmp = re.sub("\n", "\n                           ", tmp)
+					print (tmp)
+				elif isinstance(getattr(self, cap), list):
+					print ("%30s : " % cap)
+					for i in getattr(self, cap):
+						print("                                    %s" % i)
+				else:
+					print ("%30s :	  %s" % (cap, getattr(self, cap)))
+		print ('')
+# }}}
+	def display_raw(self):# {{{
+		'''partial raw representation of self'''
+		print("%s" % (self.url))
+		tmp = copy.deepcopy(self.raw_json)
+		del(tmp['metadata'])
+		tmp['metadata']={}
+		for field in self.interesting_metadata_fields:
+			try:
+				tmp['metadata'][field]=self.raw_json['metadata'][field]
+			except KeyError:
+				pass
+		print(json.dumps(tmp, sort_keys=True, indent=4, separators=(',', ': ')))
+		print ('')
+# }}}
+	def display_full_raw(self):# {{{
+		'''partial raw representation of self'''
+		print("%s" % (self.url))
+		print(json.dumps(self.raw_json, sort_keys=True, indent=4, separators=(',', ': ')))
+		print ('')
+# }}}
+# }}}
+
+class Cdmi_Capability_Class:# {{{
+	'''Capture the CDMI Capabilities'''# {{{
+# path	/cdmi_capabilities/dataobject/DiskAndTape
+	required_capabilies = [
+			'cdmi_data_redundancy',
+			'cdmi_geographic_placement',
+			'cdmi_latency',
+			# 'cdmi_capabilities_exact_inherit',
+			# 'cdmi_capabilities_templates',
+			'cdmi_throughput']
+	optional_capabilities = ['cdmi_capabilities_allowed']
+# }}}
+	def __init__(self, url):# {{{
+		self.my_capabilities = []
+		self.raw_json	  = {}
+		self.path		  = ''
+		self.capabilities = {}
+		self.metadata	  = {}
+		self.objectID	  = ''
+		self.objectName   = ''
+		self.objectType   = ''
+		self.parentID	  = ''
+		self.parentURI	  = ''
+
+		jsonData = cached_request_json(url, cdmi_auth)
+
+		self.url_basename = get_url_base(url)
+		self.raw_json = jsonData
+		url_basename = get_url_base(url)
+		self.path = jsonData['parentURI'] + '/' + jsonData['objectName']
+		self.url  = url_basename + self.path
+		# if args.raw:
+			# print ("\n-----------------------------------------")
+			# print (json.dumps(self.raw_json, sort_keys=True, indent=4, separators=(',', ': ')))
+			# print ("-----------------------------------------\n")
+		for capability in self.required_capabilies:
+			try:
+				self.capabilities[capability] = jsonData['capabilities'][capability]
+				if self.capabilities[capability] is True:
+					self.metadata[capability] = jsonData['metadata'][capability]
+					if capability not in self.my_capabilities:
+						self.my_capabilities.append(capability)
+			except KeyError:
+				print("Error: Capability %s not supported by server" % capability)
+		for capability in self.optional_capabilities:
+			try:
+				self.metadata[capability]	  = jsonData['metadata'][capability]
+				if capability not in self.my_capabilities:
+					self.my_capabilities.append(capability)
+				# pylint: disable=bare-except
+			except:
+				pass
+				# print("Info: Capability %s not supported by server\n" % capability)
+
+		self.objectID	  = jsonData['objectID']
+		self.objectName   = jsonData['objectName']
+		self.objectType   = jsonData['objectType']
+		self.parentID	  = jsonData['parentID']
+		self.parentURI	  = jsonData['parentURI']
+		# print(json.dumps(jsonData, sort_keys=True, indent=4, separators=(',', ': ')))
+# }}}
+	def get_url_path(self):# {{{
+		'''return url to own definition'''
+		return str(self.path)
+# }}}
+	def display_full(self):# {{{
+		'''nice rendering of self'''
+		print("%s" % (self.url))
+		for key in ("objectID", "objectName", "objectType", "parentID", "parentURI"):
+			print ("  %30s :	%s" % (key, getattr(self, key)))
+		for cap in self.my_capabilities:
+			print ("  %30s :	%s" % (cap, self.metadata[cap]))
+		# print(json.dumps(self.raw_json['metadata'], sort_keys=True, indent=4, separators=(',', ': ')))
+		print ('')
+# }}}
+	def display(self):# {{{
+		'''nice rendering of self'''
+		print("%s" % (self.url))
+		# print("  %30s : %s" % ("objectName",  self.objectName ))
+		for cap in self.my_capabilities:
+			print ("  %30s :	%s" % (cap, self.metadata[cap]))
+		# print(json.dumps(self.raw_json['metadata'], sort_keys=True, indent=4, separators=(',', ': ')))
+		print ('')
+# }}}
+	def display_raw(self):# {{{
+		'''nice rendering of self'''
+		print("%s" % (self.url))
+		print(json.dumps(self.raw_json, sort_keys=True, indent=4, separators=(',', ': ')))
+		print ('')
+# }}}
+	def get_destination_capability_classes(self):# {{{
+		'''return the list of available destination cdmi capability classes'''
+		retval=[]
+
+		try:
+			allowed_cap_paths = self.metadata['cdmi_capabilities_allowed']
+		except KeyError:
+			allowed_cap_paths = []
+		if isinstance(allowed_cap_paths, str):
+			url = self.url_basename + allowed_cap_paths
+			retval.append(Cdmi_Capability_Class(url))
+		else:
+			# print("-->"+str(allowed_cap_paths))
+			for path in allowed_cap_paths:
+				# print("---->"+str(self.url_basename + path))
+				url = self.url_basename + path
+				# print("--==>"+str(url))
+				retval.append(Cdmi_Capability_Class(url))
+		return (retval)
+# }}}
+# }}}
+
+def get_url_base(url):# {{{
+	'''Return protocol and host portion of an URL'''
+	tmp = url.split('/')
+	url_base = tmp[0] + '//' + tmp[2]
+	return url_base
+# }}}
+def get_url_path(url):# {{{
+	'''Return path portion of an URL'''
+	tmp = url.split('/')
+	url_path = '/'.join(tmp[3:])
+	return url_path
+# }}}
+def cached_request_json(url, auth='', verify=False, cachedir="cache"):# {{{
+	'''Cache request results and use them in case of ConnectionError'''
+	resp_json	 = {}
+	tmpb		 = get_url_base(url)
+	tmpp		 = get_url_path(url)
+	url_pathname = tmpb.replace('://','-').replace('/','_-_').replace(':','-') \
+			+ '--' + tmpp.replace('/','_-_')
+
+	# verify='certificates/cdmi-qos.data.kit.edu'
+	verify=True
+	try:
+		makedirs (cachedir)
+	except OSError as e:
+		if e.errno == errno.EEXIST:
+			pass
+		else:
+			print ("Error: %s" % str(e))
+			raise(e)
+	if args.verbose:
+		print ("Url: %s" % url)
+
+	try:
+		headers = {'X-CDMI-Specification-Version': '1.1.2'}
+		# from ben:
+			# if user:
+			    # r = requests.put('https://{0}:{1}/{2}'.format(host, port, path),
+				# auth=(user,password), headers=headers, data=json.dumps(data))
+			# elif token:
+			    # headers['Authentication'] = 'Bearer {0}'.format(token)
+			# r = requests.put('https://{0}:{1}/{2}'.format(host, port, path),
+				# headers=headers, data=json.dumps(data))
+		if auth['oidc'] != '': # use OIDC authentication:
+			headers['Authentication'] = 'Bearer {0}'.format(auth['oidc'])
+			resp = requests.get (url, auth=auth, verify=verify, headers=headers)
+		elif auth['user'] != '':
+			resp = requests.get (url, auth=(auth['user'], auth['pass']), verify=verify, headers=headers)
+
+		if resp.status_code != 200:
+			print("\nThere was a problem retrieveing the information you requested.")
+			print("The Server said: %s (%s)" \
+					% (resp.status_code, resp.reason))
+			print ("")
+			exit (resp.status_code)
+		resp_json=resp.json()
+		with open(cachedir+"/"+url_pathname, 'w') as outFile:
+			outFile.write(json.dumps(resp_json, sort_keys=True, indent=4, separators=(',', ': ')))
+	except requests.ConnectionError:
+		if args.verbose:
+			print ("Using cached version of %s" % url)
+		with open(cachedir+"/"+url_pathname, 'r') as inFile:
+			resp_json = json.load(inFile)
+	except Exception as e:
+		print ("Error: %s\n" % str(e))
+		print (str(resp))
+		raise(e)
+	return resp_json
+# }}}
+def get_all_cdmi_capabilities(url):# {{{
+	'''get_all_cdmi_capabilities'''
+	cdmi_capabilities_structure = {}
+	url_basename = get_url_base(url)
+	# url_pathname = get_url_path(url)
+
+	# get list of possible object types (folder / file | container / dataobject)
+	response_json = cached_request_json (url_basename+"/cdmi_capabilities", cdmi_auth)
+	cdmi_object_types = response_json['children']
+	# get list of possible cdmi capability classes for each object type
+	for cdmi_object_type in cdmi_object_types:
+		response_json=cached_request_json(url_basename
+					+"/cdmi_capabilities/%s"%cdmi_object_type, cdmi_auth)
+
+		cdmi_capability_class_names = response_json['children']
+		cdmi_capabilities_structure[cdmi_object_type] = {}
+		# for each class: get the content of the capabilities
+		for cdmi_capability_class_name in cdmi_capability_class_names:
+			url = url_basename +"/cdmi_capabilities/%s/%s"%(cdmi_object_type, cdmi_capability_class_name)
+			cdmi_capabilities_structure[cdmi_object_type][cdmi_capability_class_name] \
+					= Cdmi_Capability_Class(url)
+
+	return cdmi_capabilities_structure
+# }}}
+
+parser = argparse.ArgumentParser(description='Marcus Cdmi CLI')# {{{
+parser.add_argument('-u', '--url', dest='URL',
+		help='''URL of file on CMDI server (for example:
+		https://cdmi-qos.data.kit.edu/test.txt''',
+		default='https://cdmi-qos.data.kit.edu/test.txt')
+parser.add_argument('--verbose','-v', dest='verbose', action='count', default=0)
+parser.add_argument('--raw','-r', dest='raw', action='count', default=0)
+parser.add_argument('--all-classes','-a', dest='show_all_classes',action='store_true',default=False)
+parser.add_argument('--pass', dest='CDMI_PASS', default=CDMI_PASS)
+parser.add_argument('--user', dest='CDMI_USER', default=CDMI_USER)
+parser.add_argument('--oidc', '-o', dest='CDMI_OIDC', default='')
+parser.add_argument('--target', dest='cdmi_target_capability_class', default = None)
+parser.add_argument('--short', '-s', dest='short_output', action='count', default=0)
+args = parser.parse_args()
+
+# cdmi_auth=(args.CDMI_USER, args.CDMI_PASS)
+if hasattr(args,'OIDC'):
+	cdmi_auth={'user' : '', "pass" : '', 'oidc' : args.CDMI_OIDC}
+else:
+	cdmi_auth={'user' : args.CDMI_USER, "pass" : args.CDMI_PASS, 'oidc' : ''}
+
+
+# }}}
+
+# Get all capabilites available on the server
+
+# Show all storage classes # {{{
+if args.show_all_classes:
+	cdmi_capabilities = get_all_cdmi_capabilities(args.URL)
+	for cdmi_obj_type in cdmi_capabilities:
+		print("cdmi type: %s" % cdmi_obj_type)
+		for cdmi_cap_cls in cdmi_capabilities[cdmi_obj_type]:
+			if args.verbose:
+				cdmi_capabilities[cdmi_obj_type][cdmi_cap_cls].display_full()
+			else:
+				cdmi_capabilities[cdmi_obj_type][cdmi_cap_cls].display()
+# }}}
+# Start a transition into a different storage class # {{{
+elif args.cdmi_target_capability_class != None:
+	dest_cls = {"capabilitiesURI": args.cdmi_target_capability_class}
+	headers = {'X-CDMI-Specification-Version': '1.1.1'}
+	headers['Content-Type'] = 'application/cdmi-object'
+
+	result = requests.put(args.URL, json=dest_cls, headers=headers, auth=cdmi_auth)
+	if result.status_code == 204:
+		print ("Success")
+	else:
+		print ("Statuscode {0}, status: {1}".format(result.status_code, result.reason))
+# }}}
+# Default view branch {{{
+else:
+	# get and show the requested file metadata
+	coc = Cdmi_Object_Class(args.URL)
+	print ("Current Object:\n---------------")
+	if args.verbose == 2:
+		coc.display_full()
+	elif args.raw == 1:
+		coc.display_raw()
+	elif args.raw == 2:
+		coc.display_raw()
+		coc.display()
+	elif args.raw == 3:
+		coc.display_full_raw()
+	else:
+		coc.display()
+
+	if args.short_output < 2:
+		print("CDMI capabiliby class of this object:\n-------------------------------------")
+		cdmi_cap_cls = coc.get_cdmi_capability_class()
+		if args.raw == 1:
+			cdmi_cap_cls.display_raw()
+		elif args.raw > 1:
+			cdmi_cap_cls.display_raw()
+			cdmi_cap_cls.display()
+		else:
+			cdmi_cap_cls.display()
+
+		if args.short_output < 1:
+			destination_classes = cdmi_cap_cls.get_destination_capability_classes()
+			if destination_classes != []:
+				print("Possible target CDMI capabiliby classes:")
+				for dest_cls in destination_classes:
+					print ("----------------------------------------")
+					if args.raw == 1:
+						dest_cls.display_raw()
+					elif args.raw > 1:
+						dest_cls.display_raw()
+						dest_cls.display()
+					else:
+						dest_cls.display()
+					print ("To move your object into this class, type:")
+					print ("./mccli -u %s --target %s\n" % (args.URL, dest_cls.get_url_path()))
+
+	transit_status = coc.get_transition_status()
+	if transit_status != {}:
+		print("Object is in Transition:\n------------------------")
+		print (json.dumps(transit_status, sort_keys=True, indent=4, separators=(',', ': ')))
+# }}}
+#
