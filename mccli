@@ -16,6 +16,7 @@ from os import makedirs
 from os.path import basename
 import copy
 import requests
+from simplejson.scanner import JSONDecodeError
 
 # Defaults:
 OIDC_TOKEN=""
@@ -58,6 +59,9 @@ class Cdmi_Object_Class:# {{{
 	def __init__(self, url):# {{{
 		'''constructor'''
 		jsonData = cached_request_json (url, cdmi_auth)
+		if args.verbose >2:
+			print(json.dumps(jsonData, sort_keys=True, indent=4, separators=(',', ': ')))
+
 		# self.path = jsonData['parentURI'] + '/' + jsonData['objectName']
 		self.url_basename = get_url_base(url)
 		self.path = '/'.join((jsonData['parentURI'] , jsonData['objectName']))\
@@ -220,8 +224,8 @@ class Cdmi_Capability_Class:# {{{
 			'cdmi_latency',
 			# 'cdmi_capabilities_exact_inherit',
 			# 'cdmi_capabilities_templates',
-			'cdmi_throughput']
-	optional_capabilities = ['cdmi_capabilities_allowed']
+			]
+	optional_capabilities = ['cdmi_capabilities_allowed', 'cdmi_throughput']
 # }}}
 	def __init__(self, url):# {{{
 		self.my_capabilities = []
@@ -248,11 +252,16 @@ class Cdmi_Capability_Class:# {{{
 			# print ("-----------------------------------------\n")
 		for capability in self.required_capabilies:
 			try:
+				if args.verbose:
+					print ("Trying to add capability '{}' ".format(capability))
 				self.capabilities[capability] = jsonData['capabilities'][capability]
 				if self.capabilities[capability] is True:
 					self.metadata[capability] = jsonData['metadata'][capability]
 					if capability not in self.my_capabilities:
 						self.my_capabilities.append(capability)
+				if args.verbose:
+					print ("  added capability '{}' ".format(capability))
+				self.parentURI	  = jsonData['parentURI']
 			except KeyError:
 				print("Error: Capability %s not supported by server" % capability)
 		for capability in self.optional_capabilities:
@@ -289,6 +298,7 @@ class Cdmi_Capability_Class:# {{{
 	def display(self):# {{{
 		'''nice rendering of self'''
 		print("%s" % (self.url))
+		print("my_caps: {}".format(self.my_capabilities))
 		# print("  %30s : %s" % ("objectName",  self.objectName ))
 		for cap in self.my_capabilities:
 			print ("  %30s :	%s" % (cap, self.metadata[cap]))
@@ -358,36 +368,58 @@ def cached_request_json(url, auth='', verify=False, cachedir="cache"):# {{{
 
 	try:
 		headers = {'X-CDMI-Specification-Version': '1.1.2'}
-		# from ben:
-			# if user:
-			    # r = requests.put('https://{0}:{1}/{2}'.format(host, port, path),
-				# auth=(user,password), headers=headers, data=json.dumps(data))
-			# elif token:
-			    # headers['Authentication'] = 'Bearer {0}'.format(token)
-			# r = requests.put('https://{0}:{1}/{2}'.format(host, port, path),
-				# headers=headers, data=json.dumps(data))
 		if auth['oidc'] != '': # use OIDC authentication:
-			headers['Authentication'] = 'Bearer {0}'.format(auth['oidc'])
-			resp = requests.get (url, auth=auth, verify=verify, headers=headers)
+			if args.verbose:
+				print ("Using OIDC Token")
+			headers['Authorization'] = 'Bearer {0}'.format(auth['oidc'])
+			# headers['Authentication'] = 'Bearer {0}'.format(auth['oidc'])
+			if args.verbose > 1:
+				import logging
+				import http.client as http_client
+				http_client.HTTPConnection.debuglevel = 1
+				logging.basicConfig()
+				logging.getLogger().setLevel(logging.DEBUG)
+				requests_log = logging.getLogger("requests.packages.urllib3")
+				requests_log.setLevel(logging.DEBUG)
+				requests_log.propagate = True
+				print ("----------------------------------------------------")
+				print ("Headers: {}".format(headers))
+				print ("----------------------------------------------------")
+
+
+			resp = requests.get (url, verify=verify, headers=headers)
+			if args.verbose > 1:
+				print ("\n----------------------------------------------------")
 		elif auth['user'] != '':
+			if args.verbose:
+				print ("Using username/password")
 			resp = requests.get (url, auth=(auth['user'], auth['pass']), verify=verify, headers=headers)
 
 		if resp.status_code != 200:
-			print("\nThere was a problem retrieveing the information you requested.")
+			print("\nThere was a problem in communication with the server.")
 			print("The Server said: %s (%s)" \
 					% (resp.status_code, resp.reason))
 			print ("")
-			exit (resp.status_code)
-		resp_json=resp.json()
+			exit (3)
+		try:
+			resp_json=resp.json()
+		except JSONDecodeError as e:
+			print ("\nJSONDecodeError: {0}".format(e))
+			print ("Terminating")
+			exit (1)
 		with open(cachedir+"/"+url_pathname, 'w') as outFile:
 			outFile.write(json.dumps(resp_json, sort_keys=True, indent=4, separators=(',', ': ')))
+	except requests.exceptions.SSLError as e:
+		print ("SSL Error: {}".format(e))
+		print ("Terminating")
+		exit (2)
 	except requests.ConnectionError:
 		if args.verbose:
 			print ("Using cached version of %s" % url)
 		with open(cachedir+"/"+url_pathname, 'r') as inFile:
 			resp_json = json.load(inFile)
 	except Exception as e:
-		print ("Error: %s\n" % str(e))
+		print ("==== Error: %s\n" % str(e))
 		print (str(resp))
 		raise(e)
 	return resp_json
@@ -418,7 +450,7 @@ def get_all_cdmi_capabilities(url):# {{{
 # }}}
 
 parser = argparse.ArgumentParser(description='Marcus Cdmi CLI')# {{{
-parser.add_argument('-u', '--url', dest='URL',
+parser.add_argument(dest='URL',
 		help='''URL of file on CMDI server (for example:
 		https://cdmi-qos.data.kit.edu/test.txt''',
 		default='https://cdmi-qos.data.kit.edu/test.txt')
@@ -433,12 +465,15 @@ parser.add_argument('--short', '-s', dest='short_output', action='count', defaul
 args = parser.parse_args()
 
 # cdmi_auth=(args.CDMI_USER, args.CDMI_PASS)
-if hasattr(args,'OIDC'):
+if hasattr(args,'CDMI_OIDC'):
 	cdmi_auth={'user' : '', "pass" : '', 'oidc' : args.CDMI_OIDC}
 else:
 	cdmi_auth={'user' : args.CDMI_USER, "pass" : args.CDMI_PASS, 'oidc' : ''}
+if args.verbose:
+	print(cdmi_auth)
 
-
+if args.verbose > 1:
+	print("Verbosity level {}".format(args.verbose))
 # }}}
 
 # Get all capabilites available on the server
