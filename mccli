@@ -539,7 +539,7 @@ else:
 					else:
 						dest_cls.display()
 					print ("To move your object into this class, type:")
-					print ("./mccli -u %s --target %s\n" % (args.URL, dest_cls.get_url_path()))
+					print ("./mccli %s --target %s\n" % (args.URL, dest_cls.get_url_path()))
 
 	transit_status = coc.get_transition_status()
 	if transit_status != {}:
