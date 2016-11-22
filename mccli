@@ -18,15 +18,6 @@ import copy
 import requests
 from simplejson.scanner import JSONDecodeError
 
-# Defaults:
-OIDC_TOKEN=""
-CDMI_USER="restadmin"
-CDMI_PASS="d38c4d243e3e80cec708"
-CDMI_USER_L="xxxx"
-CDMI_PASS_L="xxxx"
-HPSS_USER="restadmin"
-HPSS_PASS="1b3cc94ea657b7976a5f"
-
 class Cdmi_Object_Class:# {{{
 	'''Capture the CDMI metadata of an Object'''# {{{
 # path	/cdmi_capabilities/dataobject/DiskAndTape
@@ -353,7 +344,6 @@ def cached_request_json(url, auth='', verify=False, cachedir="cache"):# {{{
 	url_pathname = tmpb.replace('://','-').replace('/','_-_').replace(':','-') \
 			+ '--' + tmpp.replace('/','_-_')
 
-	# verify='certificates/cdmi-qos.data.kit.edu'
 	verify=True
 	try:
 		makedirs (cachedir)
@@ -386,7 +376,6 @@ def cached_request_json(url, auth='', verify=False, cachedir="cache"):# {{{
 				print ("Headers: {}".format(headers))
 				print ("----------------------------------------------------")
 
-
 			resp = requests.get (url, verify=verify, headers=headers)
 			if args.verbose > 1:
 				print ("\n----------------------------------------------------")
@@ -395,6 +384,10 @@ def cached_request_json(url, auth='', verify=False, cachedir="cache"):# {{{
 				print ("Using username/password")
 			resp = requests.get (url, auth=(auth['user'], auth['pass']), verify=verify, headers=headers)
 
+		else:
+			# THis code should not be reached
+			print("Error: No authentication available")
+			exit (5)
 		if resp.status_code != 200:
 			print("\nThere was a problem in communication with the server.")
 			print("The Server said: %s (%s)" \
@@ -457,18 +450,21 @@ parser.add_argument(dest='URL',
 parser.add_argument('--verbose','-v', dest='verbose', action='count', default=0)
 parser.add_argument('--raw','-r', dest='raw', action='count', default=0)
 parser.add_argument('--all-classes','-a', dest='show_all_classes',action='store_true',default=False)
-parser.add_argument('--pass', dest='CDMI_PASS', default=CDMI_PASS)
-parser.add_argument('--user', dest='CDMI_USER', default=CDMI_USER)
+parser.add_argument('--pass', dest='CDMI_PASS', default='')
+parser.add_argument('--user', dest='CDMI_USER', default='')
 parser.add_argument('--oidc', '-o', dest='CDMI_OIDC', default='')
 parser.add_argument('--target', dest='cdmi_target_capability_class', default = None)
 parser.add_argument('--short', '-s', dest='short_output', action='count', default=0)
 args = parser.parse_args()
 
 # cdmi_auth=(args.CDMI_USER, args.CDMI_PASS)
-if hasattr(args,'CDMI_OIDC'):
+if args.CDMI_OIDC != '':
 	cdmi_auth={'user' : '', "pass" : '', 'oidc' : args.CDMI_OIDC}
-else:
+elif args.CDMI_USER != '':
 	cdmi_auth={'user' : args.CDMI_USER, "pass" : args.CDMI_PASS, 'oidc' : ''}
+else:
+	print ("Error: No credentials supplied")
+	exit (4)
 if args.verbose:
 	print(cdmi_auth)
 
