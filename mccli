@@ -289,7 +289,6 @@ class Cdmi_Capability_Class:# {{{
 	def display(self):# {{{
 		'''nice rendering of self'''
 		print("%s" % (self.url))
-		print("my_caps: {}".format(self.my_capabilities))
 		# print("  %30s : %s" % ("objectName",  self.objectName ))
 		for cap in self.my_capabilities:
 			print ("  %30s :	%s" % (cap, self.metadata[cap]))
@@ -336,8 +335,10 @@ def get_url_path(url):# {{{
 	url_path = '/'.join(tmp[3:])
 	return url_path
 # }}}
-def cached_request_json(url, auth='', verify=False, cachedir="cache"):# {{{
+def cached_request_json(url, auth='', verify=False, cachedir=''):# {{{
 	'''Cache request results and use them in case of ConnectionError'''
+	if cachedir == '':
+		cachedir = args.cachedir
 	resp_json	 = {}
 	tmpb		 = get_url_base(url)
 	tmpp		 = get_url_path(url)
@@ -409,8 +410,16 @@ def cached_request_json(url, auth='', verify=False, cachedir="cache"):# {{{
 	except requests.ConnectionError:
 		if args.verbose:
 			print ("Using cached version of %s" % url)
-		with open(cachedir+"/"+url_pathname, 'r') as inFile:
-			resp_json = json.load(inFile)
+		try:
+			with open(cachedir+"/"+url_pathname, 'r') as inFile:
+				resp_json = json.load(inFile)
+		except Exception as e:
+			print ("""
+This must be a typo in the hostname, or trying to
+access a cached file that was not cached yet. All I can do now is fail:
+		  """)
+			print (e)
+			exit (6)
 	except Exception as e:
 		print ("==== Error: %s\n" % str(e))
 		print (str(resp))
@@ -455,6 +464,7 @@ parser.add_argument('--user', dest='CDMI_USER', default='')
 parser.add_argument('--oidc', '-o', dest='CDMI_OIDC', default='')
 parser.add_argument('--target', dest='cdmi_target_capability_class', default = None)
 parser.add_argument('--short', '-s', dest='short_output', action='count', default=0)
+parser.add_argument('--cachedir', '-c', dest='cachedir', default='/tmp/mccli')
 args = parser.parse_args()
 
 # cdmi_auth=(args.CDMI_USER, args.CDMI_PASS)
