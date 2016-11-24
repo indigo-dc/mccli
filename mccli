@@ -257,9 +257,14 @@ class Cdmi_Capability_Class:# {{{
 				print("Error: Capability %s not supported by server" % capability)
 		for capability in self.optional_capabilities:
 			try:
-				self.metadata[capability]	  = jsonData['metadata'][capability]
-				if capability not in self.my_capabilities:
-					self.my_capabilities.append(capability)
+				self.capabilities[capability] = jsonData['capabilities'][capability]
+				if self.capabilities[capability] is True:
+					self.metadata[capability]	  = jsonData['metadata'][capability]
+					if capability not in self.my_capabilities:
+						self.my_capabilities.append(capability)
+				else:
+					if jsonData['metadata'][capability] != '':
+						print ("Error: {0} is defined in metadata, but no in capability.".format(capability))
 				# pylint: disable=bare-except
 			except:
 				pass
