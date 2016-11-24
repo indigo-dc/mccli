@@ -257,14 +257,9 @@ class Cdmi_Capability_Class:# {{{
 				print("Error: Capability %s not supported by server" % capability)
 		for capability in self.optional_capabilities:
 			try:
-				self.capabilities[capability] = jsonData['capabilities'][capability]
-				if self.capabilities[capability] is True:
-					self.metadata[capability]	  = jsonData['metadata'][capability]
-					if capability not in self.my_capabilities:
-						self.my_capabilities.append(capability)
-				else:
-					if jsonData['metadata'][capability] != '':
-						print ("Error: {0} is defined in metadata, but no in capability.".format(capability))
+				self.metadata[capability]	  = jsonData['metadata'][capability]
+				if capability not in self.my_capabilities:
+					self.my_capabilities.append(capability)
 				# pylint: disable=bare-except
 			except:
 				pass
@@ -277,6 +272,76 @@ class Cdmi_Capability_Class:# {{{
 		self.parentURI	  = jsonData['parentURI']
 		# print(json.dumps(jsonData, sort_keys=True, indent=4, separators=(',', ': ')))
 # }}}
+
+
+	def __init2__(self, url):# {{{# {{{
+		self.my_capabilities = []
+		self.raw_json	  = {}
+		self.path		  = ''
+		self.capabilities = {}
+		self.metadata	  = {}
+		self.objectID	  = ''
+		self.objectName   = ''
+		self.objectType   = ''
+		self.parentID	  = ''
+		self.parentURI	  = ''
+
+		jsonData = cached_request_json(url, cdmi_auth)
+
+		self.url_basename = get_url_base(url)
+		self.raw_json = jsonData
+		url_basename = get_url_base(url)
+		self.path = jsonData['parentURI'] + '/' + jsonData['objectName']
+		self.url  = url_basename + self.path
+		# if args.raw:
+			# print ("\n-----------------------------------------")
+			# print (json.dumps(self.raw_json, sort_keys=True, indent=4, separators=(',', ': ')))
+			# print ("-----------------------------------------\n")
+		for capability in self.required_capabilies:
+			try:
+				if args.verbose:
+					print ("Trying to add capability '{}' ".format(capability))
+				self.capabilities[capability] = jsonData['capabilities'][capability]
+				if self.capabilities[capability] is True:
+					self.metadata[capability] = jsonData['metadata'][capability]
+					if capability not in self.my_capabilities:
+						self.my_capabilities.append(capability)
+				if args.verbose:
+					print ("  added capability '{}' ".format(capability))
+				self.parentURI	  = jsonData['parentURI']
+			except KeyError:
+				print("Error: Capability %s not supported by server" % capability)
+		for capability in self.optional_capabilities:
+			try:
+				self.capabilities[capability] = jsonData['capabilities'][capability]
+				print ("0")
+				if self.capabilities[capability] is True:
+					print ("1")
+					self.metadata[capability]	  = jsonData['metadata'][capability]
+					print ("2")
+					if capability not in self.my_capabilities:
+						self.my_capabilities.append(capability)
+					print ("3")
+				# else:
+					# if jsonData['metadata'][capability] != '':
+						# print ("Error: {0} is defined in metadata, but no in capability.".format(capability))
+				# pylint: disable=bare-except
+			except:
+				print ("Error interpreting {0}".format(capability))
+				pass
+				# print("Info: Capability %s not supported by server\n" % capability)
+		self.display_raw()
+		print (self.my_capabilities)
+
+		self.objectID	  = jsonData['objectID']
+		self.objectName   = jsonData['objectName']
+		self.objectType   = jsonData['objectType']
+		self.parentID	  = jsonData['parentID']
+		self.parentURI	  = jsonData['parentURI']
+		# print(json.dumps(jsonData, sort_keys=True, indent=4, separators=(',', ': ')))
+# }}}
+
+
 	def get_url_path(self):# {{{
 		'''return url to own definition'''
 		return str(self.path)
