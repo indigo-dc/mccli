@@ -12,7 +12,7 @@ import argparse
 import errno
 import re
 from sys import stdout
-from os import makedirs
+from os import makedirs, getenv
 from os.path import basename
 import copy
 import requests
@@ -246,63 +246,8 @@ class Cdmi_Capability_Class:# {{{
 				if args.verbose:
 					print ("Trying to add capability '{}' ".format(capability))
 				self.capabilities[capability] = jsonData['capabilities'][capability]
-				if self.capabilities[capability] is True:
-					self.metadata[capability] = jsonData['metadata'][capability]
-					if capability not in self.my_capabilities:
-						self.my_capabilities.append(capability)
-				if args.verbose:
-					print ("  added capability '{}' ".format(capability))
-				self.parentURI	  = jsonData['parentURI']
-			except KeyError:
-				print("Error: Capability %s not supported by server" % capability)
-		for capability in self.optional_capabilities:
-			try:
-				self.metadata[capability]	  = jsonData['metadata'][capability]
-				if capability not in self.my_capabilities:
-					self.my_capabilities.append(capability)
-				# pylint: disable=bare-except
-			except:
-				pass
-				# print("Info: Capability %s not supported by server\n" % capability)
-
-		self.objectID	  = jsonData['objectID']
-		self.objectName   = jsonData['objectName']
-		self.objectType   = jsonData['objectType']
-		self.parentID	  = jsonData['parentID']
-		self.parentURI	  = jsonData['parentURI']
-		# print(json.dumps(jsonData, sort_keys=True, indent=4, separators=(',', ': ')))
-# }}}
-
-
-	def __init2__(self, url):# {{{# {{{
-		self.my_capabilities = []
-		self.raw_json	  = {}
-		self.path		  = ''
-		self.capabilities = {}
-		self.metadata	  = {}
-		self.objectID	  = ''
-		self.objectName   = ''
-		self.objectType   = ''
-		self.parentID	  = ''
-		self.parentURI	  = ''
-
-		jsonData = cached_request_json(url, cdmi_auth)
-
-		self.url_basename = get_url_base(url)
-		self.raw_json = jsonData
-		url_basename = get_url_base(url)
-		self.path = jsonData['parentURI'] + '/' + jsonData['objectName']
-		self.url  = url_basename + self.path
-		# if args.raw:
-			# print ("\n-----------------------------------------")
-			# print (json.dumps(self.raw_json, sort_keys=True, indent=4, separators=(',', ': ')))
-			# print ("-----------------------------------------\n")
-		for capability in self.required_capabilies:
-			try:
-				if args.verbose:
-					print ("Trying to add capability '{}' ".format(capability))
-				self.capabilities[capability] = jsonData['capabilities'][capability]
-				if self.capabilities[capability] is True:
+		# This is CDMI Spec, but stupid, should be bool, not string:
+				if self.capabilities[capability] == "true":
 					self.metadata[capability] = jsonData['metadata'][capability]
 					if capability not in self.my_capabilities:
 						self.my_capabilities.append(capability)
@@ -314,24 +259,16 @@ class Cdmi_Capability_Class:# {{{
 		for capability in self.optional_capabilities:
 			try:
 				self.capabilities[capability] = jsonData['capabilities'][capability]
-				print ("0")
-				if self.capabilities[capability] is True:
-					print ("1")
-					self.metadata[capability]	  = jsonData['metadata'][capability]
-					print ("2")
+				if self.capabilities[capability] == "true":
+					self.metadata[capability] = jsonData['metadata'][capability]
 					if capability not in self.my_capabilities:
+						if args.verbose:
+							print("added: {0}".format(capability))
 						self.my_capabilities.append(capability)
-					print ("3")
-				# else:
-					# if jsonData['metadata'][capability] != '':
-						# print ("Error: {0} is defined in metadata, but no in capability.".format(capability))
 				# pylint: disable=bare-except
-			except:
-				print ("Error interpreting {0}".format(capability))
-				pass
-				# print("Info: Capability %s not supported by server\n" % capability)
-		self.display_raw()
-		print (self.my_capabilities)
+			except Exception as e:
+				print ("Excption: {}".format(e))
+				# pass
 
 		self.objectID	  = jsonData['objectID']
 		self.objectName   = jsonData['objectName']
@@ -340,7 +277,6 @@ class Cdmi_Capability_Class:# {{{
 		self.parentURI	  = jsonData['parentURI']
 		# print(json.dumps(jsonData, sort_keys=True, indent=4, separators=(',', ': ')))
 # }}}
-
 
 	def get_url_path(self):# {{{
 		'''return url to own definition'''
@@ -526,15 +462,29 @@ parser.add_argument(dest='URL',
 		help='''URL of file on CMDI server (for example:
 		https://cdmi-qos.data.kit.edu/test.txt''',
 		default='https://cdmi-qos.data.kit.edu/test.txt')
-parser.add_argument('--verbose','-v', dest='verbose', action='count', default=0)
-parser.add_argument('--raw','-r', dest='raw', action='count', default=0)
-parser.add_argument('--all-classes','-a', dest='show_all_classes',action='store_true',default=False)
-parser.add_argument('--pass', dest='CDMI_PASS', default='')
-parser.add_argument('--user', dest='CDMI_USER', default='')
-parser.add_argument('--oidc', '-o', dest='CDMI_OIDC', default='')
-parser.add_argument('--target', dest='cdmi_target_capability_class', default = None)
-parser.add_argument('--short', '-s', dest='short_output', action='count', default=0)
-parser.add_argument('--cachedir', '-c', dest='cachedir', default='/tmp/mccli')
+parser.add_argument('--verbose','-v', dest='verbose', action='count', default=0,
+				   help='''Show more debug output. Can be used multiple times ''')
+parser.add_argument('--raw','-r', dest='raw', action='count', default=0,
+				   help='''Show raw json output. Can be used multiple times. Use twice to show json
+					and intepreted output''')
+parser.add_argument('--all-classes','-a', dest='show_all_classes',action='store_true',default=False,
+				   help='''Show all available storage classes of given CDMI server ''')
+parser.add_argument('--dest-classes','-d', dest='show_dest_classes',action='store_true',default=False,
+				   help='''Show possible destination classes for given CDMI object ''')
+parser.add_argument('--user', dest='CDMI_USER', default='',
+				   help='''Username ''')
+parser.add_argument('--pass', dest='CDMI_PASS', default='',
+				   help='''Password ''')
+parser.add_argument('--oidc', '-o', dest='CDMI_OIDC', default=getenv("OIDC"),
+				   help='''OpenID-Connect token (exported environment variables will be used
+					as a default: export OIDC=<token>  ''')
+parser.add_argument('--target', dest='cdmi_target_capability_class', default = None,
+				   help='''Target cdmi capability class to stage object to ''')
+parser.add_argument('--short', '-s', dest='short_output', action='count', default=0,
+				   help='''Be concise ''')
+parser.add_argument('--cachedir', '-c', dest='cachedir', default='/tmp/mccli',
+					help='''Dir to cache cdmi responses. Useful for offline testing. Default:
+					/tmp/mccli ''')
 args = parser.parse_args()
 
 # cdmi_auth=(args.CDMI_USER, args.CDMI_PASS)
@@ -571,7 +521,27 @@ elif args.cdmi_target_capability_class != None:
 	headers = {'X-CDMI-Specification-Version': '1.1.1'}
 	headers['Content-Type'] = 'application/cdmi-object'
 
-	result = requests.put(args.URL, json=dest_cls, headers=headers, auth=cdmi_auth)
+	# print("args.URL: {0}".format(args.URL))
+	# print("dest_cls: {0}".format(dest_cls))
+	# print("headers: {0}".format(headers))
+	# print("cdmi_auth: {0}".format(cdmi_auth))
+	if cdmi_auth['oidc'] != '': # use OIDC authentication:
+		if args.verbose:
+			print ("Using OIDC: {0}".format(cdmi_auth['oidc']))
+		headers['Authorization'] = 'Bearer {0}'.format(cdmi_auth['oidc'])
+		result = requests.put(args.URL, json=dest_cls, headers=headers)
+		# resp = requests.get (url, verify=verify, headers=headers)
+	elif cdmi_auth['user'] != '':
+		if args.verbose:
+			print ("Using username: {0}".format(cdmi_auth['user']))
+		result = requests.get (args.URL, json=dest_cls,
+						 auth=(cdmi_auth['user'], cdmi_auth['pass']), headers=headers)
+
+	else:
+		# THis code should not be reached
+		print("Error: No authentication available")
+		exit (5)
+
 	if result.status_code == 204:
 		print ("Success")
 	else:
@@ -605,21 +575,27 @@ else:
 		else:
 			cdmi_cap_cls.display()
 
-		if args.short_output < 1:
-			destination_classes = cdmi_cap_cls.get_destination_capability_classes()
-			if destination_classes != []:
-				print("Possible target CDMI capabiliby classes:")
-				for dest_cls in destination_classes:
-					print ("----------------------------------------")
-					if args.raw == 1:
-						dest_cls.display_raw()
-					elif args.raw > 1:
-						dest_cls.display_raw()
-						dest_cls.display()
-					else:
-						dest_cls.display()
-					print ("To move your object into this class, type:")
-					print ("./mccli %s --target %s\n" % (args.URL, dest_cls.get_url_path()))
+		if (args.show_dest_classes):
+			if args.short_output < 1:
+				destination_classes = cdmi_cap_cls.get_destination_capability_classes()
+				if destination_classes != []:
+					for i in range(1,120):
+						stdout.write ("=")
+					print("\nPossible target CDMI capabiliby classes:")
+					for dest_cls in destination_classes:
+						print ("----------------------------------------")
+						if args.raw == 1:
+							dest_cls.display_raw()
+						elif args.raw > 1:
+							dest_cls.display_raw()
+							dest_cls.display()
+						else:
+							dest_cls.display()
+						print ("    To move your object into this class, type:")
+						print ("    ./mccli %s --target %s" % (args.URL, dest_cls.get_url_path()))
+				for i in range(1,120):
+					stdout.write ("=")
+				print ("\n")
 
 	transit_status = coc.get_transition_status()
 	if transit_status != {}:
