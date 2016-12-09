@@ -1,7 +1,7 @@
 ##Usage
 
-export OIDC=<OIDC Access Toeken>
-./mccli https://cdmi-qos.data.kit.edu
+    export OIDC=<OIDC Access Toeken>
+    ./mccli https://cdmi-qos.data.kit.edu
 
 The environment variable OIDC should contain a valid OIDC access token.
 You can get one via https://tts.data.kit.edu => show me my token
