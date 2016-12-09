@@ -267,8 +267,8 @@ class Cdmi_Capability_Class:# {{{
 						self.my_capabilities.append(capability)
 				# pylint: disable=bare-except
 			except Exception as e:
-				print ("Excption: {}".format(e))
-				# pass
+				# print ("Excption: {}".format(e))
+				pass
 
 		self.objectID	  = jsonData['objectID']
 		self.objectName   = jsonData['objectName']
